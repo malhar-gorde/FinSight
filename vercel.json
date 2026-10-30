@@ -4,7 +4,7 @@
     "api/index.py": {
       "includeFiles": "finsight/**",
       "excludeFiles": "{node_modules,.next,tests,data,docs}/**",
-      "maxDuration": 30
+      "maxDuration": 60
     }
   }
 }

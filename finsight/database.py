@@ -114,6 +114,16 @@ class _Connection:
         cursor.execute(sql, tuple(params))
         return cursor
 
+    def executemany(self, sql: str, rows) -> None:
+        """Run one statement for many rows. psycopg pipelines these into very few
+        network round trips, which matters when the database is in another region."""
+        rows = [tuple(row) for row in rows]
+        if not rows:
+            return
+        if self.postgres:
+            sql = sql.replace("?", "%s")
+        self.raw.cursor().executemany(sql, rows)
+
     def fetchone(self, sql: str, params=()):
         row = self.execute(sql, params).fetchone()
         return dict(row) if row is not None else None
@@ -273,9 +283,81 @@ def init_db(db_path=None) -> None:
             ddl = ddl.replace("{REAL}", "DOUBLE PRECISION")
         else:
             ddl = SCHEMA.replace("{ID}", "INTEGER PRIMARY KEY AUTOINCREMENT").replace("{REAL}", "REAL")
-        for statement in ddl.split(";"):
-            if statement.strip():
-                conn.execute(statement)
+        if conn.postgres:
+            conn.raw.execute(ddl)  # one round trip for the whole schema
+        else:
+            conn.raw.executescript(ddl)
+
+
+# --------------------------------------------------------------------------- #
+# Bulk inserts (used for demo data: one round trip per table, not per row)
+# --------------------------------------------------------------------------- #
+def add_transactions_bulk(rows, is_sample=False, db_path=None) -> int:
+    """rows: (date, description, category, type, amount, payment_method, notes) tuples."""
+    now = _now()
+    cleaned = []
+    for row in rows:
+        d = validate_transaction(*row)
+        cleaned.append((d["date"], d["description"], d["category"], d["type"], d["amount"],
+                        d["payment_method"], d["notes"], int(is_sample), now, now))
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO transactions
+               (date, description, category, type, amount, payment_method, notes,
+                is_sample, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cleaned,
+        )
+    return len(cleaned)
+
+
+def add_budgets_bulk(rows, is_sample=False, db_path=None) -> None:
+    """rows: (month, category, amount) tuples. Existing month/category pairs are skipped."""
+    now = _now()
+    cleaned = []
+    for row in rows:
+        d = validate_budget(*row)
+        cleaned.append((d["month"], d["category"], d["amount"], int(is_sample), now))
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO budgets (month, category, amount, is_sample, created_at) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (month, category) DO NOTHING""",
+            cleaned,
+        )
+
+
+def add_contributions_bulk(rows, db_path=None) -> None:
+    """rows: (goal_id, date, amount, note) tuples; amounts must be positive."""
+    now = _now()
+    cleaned = [(int(goal_id), to_iso_date(when, "Contribution date"), validate_amount(amount, "Contribution"),
+                str(note or "")[:200], now) for goal_id, when, amount, note in rows]
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO goal_contributions (goal_id, date, amount, kind, note, created_at)
+               VALUES (?, ?, ?, 'contribution', ?, ?)""",
+            cleaned,
+        )
+
+
+def add_investments_bulk(holdings, is_sample=False, db_path=None) -> None:
+    """holdings: dicts with the keyword arguments of add_investment()."""
+    now = _now()
+    cleaned = []
+    for h in holdings:
+        d = validate_investment(h["name"], h["category"], h["valuation_mode"], h["purchase_date"],
+                                h.get("quantity"), h.get("purchase_price"), h.get("current_price"),
+                                h.get("invested_amount"), h.get("current_value"), h.get("notes", ""))
+        cleaned.append((d["name"], d["category"], d["valuation_mode"], d["quantity"], d["purchase_price"],
+                        d["current_price"], d["invested_amount"], d["current_value"], d["purchase_date"],
+                        now, d["notes"], int(is_sample), now))
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO investments
+               (name, category, valuation_mode, quantity, purchase_price, current_price, invested_amount,
+                current_value, purchase_date, price_updated_at, notes, is_sample, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cleaned,
+        )
 
 
 def _insert(conn, sql: str, params) -> int:

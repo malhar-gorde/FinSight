@@ -267,3 +267,24 @@ def test_find_database_url_handles_vercel_names():
     # Non-postgres values and unrelated variables are ignored
     assert db.find_database_url({"DATABASE_URL": "", "OTHER": url}) is None
     assert db.find_database_url({}) is None
+
+
+def test_first_run_setup_uses_few_round_trips(fresh_target, monkeypatch):
+    """Seeding must not issue one query per row: on Vercel each call can cost a
+    cross-region network round trip, and ~200 of them exceeded the time limit."""
+    calls = {"n": 0}
+    original_execute, original_many = db._Connection.execute, db._Connection.executemany
+
+    def counting_execute(self, sql, params=()):
+        calls["n"] += 1
+        return original_execute(self, sql, params)
+
+    def counting_many(self, sql, rows):
+        calls["n"] += 1
+        return original_many(self, sql, rows)
+
+    monkeypatch.setattr(db._Connection, "execute", counting_execute)
+    monkeypatch.setattr(db._Connection, "executemany", counting_many)
+    assert sample_data.initialize(fresh_target) is True
+    assert calls["n"] <= 20, f"first-run setup made {calls['n']} database calls"
+    assert db.get_record_counts(fresh_target)["transactions"]["sample"] > 100

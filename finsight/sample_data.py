@@ -96,22 +96,24 @@ def _insert_sample_data(db_path=None, today: date | None = None) -> None:
     current_month = month_key(today)
     months = [shift_month(current_month, -offset) for offset in range(SAMPLE_MONTHS - 1, -1, -1)]
 
+    # Each table is written with one batched statement (a handful of network round trips
+    # in total), so first-run setup stays fast even when the database is far away.
+    transactions = []
     for index, month in enumerate(months):
         for day, description, category, txn_type, amount, method, notes in _transactions_for_month(month, index, rng):
             txn_date = _day(month, day)
             if txn_date > today:
                 continue  # never create future-dated records
-            db.add_transaction(txn_date, description, category, txn_type, amount, method,
-                               notes, is_sample=True, db_path=db_path)
+            transactions.append((txn_date, description, category, txn_type, amount, method, notes))
+    db.add_transactions_bulk(transactions, is_sample=True, db_path=db_path)
 
     # Budgets for the last three months.
     budget_plan = {
         "Food": 14000, "Travel": 5000, "Shopping": 9000, "Entertainment": 2000,
         "Bills and Utilities": 3500, "Housing": 15000,
     }
-    for month in months[-3:]:
-        for category, limit in budget_plan.items():
-            db.add_budget(month, category, limit, is_sample=True, db_path=db_path)
+    db.add_budgets_bulk([(month, category, limit) for month in months[-3:] for category, limit in budget_plan.items()],
+                        is_sample=True, db_path=db_path)
 
     # Savings goals with contribution history.
     emergency = db.add_goal(
@@ -119,7 +121,6 @@ def _insert_sample_data(db_path=None, today: date | None = None) -> None:
         "Six months of essential expenses, kept in a liquid account.",
         is_sample=True, db_path=db_path,
     )
-    db.add_contribution(emergency, 60000, _day(months[0], 1), "Opening balance", db_path=db_path)
     laptop = db.add_goal(
         "New Laptop", 85000, _day(shift_month(current_month, 5), 28),
         "Upgrade for data science coursework.", is_sample=True, db_path=db_path,
@@ -128,12 +129,14 @@ def _insert_sample_data(db_path=None, today: date | None = None) -> None:
         "Goa Vacation", 25000, _day(shift_month(current_month, 1), 20),
         "December trip with college friends.", is_sample=True, db_path=db_path,
     )
+    contributions = [(emergency, _day(months[0], 1), 60000, "Opening balance")]
     for month in months:
         contribution_date = min(_day(month, 2), today)
-        db.add_contribution(emergency, 5000, contribution_date, "Monthly transfer", db_path=db_path)
-        db.add_contribution(laptop, 5000, contribution_date, "Monthly transfer", db_path=db_path)
+        contributions.append((emergency, contribution_date, 5000, "Monthly transfer"))
+        contributions.append((laptop, contribution_date, 5000, "Monthly transfer"))
     for month in months[-5:]:
-        db.add_contribution(vacation, 5000, min(_day(month, 2), today), "Monthly transfer", db_path=db_path)
+        contributions.append((vacation, min(_day(month, 2), today), 5000, "Monthly transfer"))
+    db.add_contributions_bulk(contributions, db_path=db_path)
 
     # Small investment portfolio (illustrative, manually entered valuations).
     note = "Demonstration record — prices are illustrative and manually entered."
@@ -146,12 +149,12 @@ def _insert_sample_data(db_path=None, today: date | None = None) -> None:
         ("Gold coin (5 g)", "Gold", VALUATION_FIXED, None, None, None, 31500, 36800, 400),
         ("Bank Fixed Deposit — 1 yr", "Fixed Deposits", VALUATION_FIXED, None, None, None, 50000, 52150, 210),
     ]
-    for name, category, mode, qty, buy, current, invested, value, days_ago in holdings:
-        db.add_investment(
-            name, category, mode, today - timedelta(days=days_ago), quantity=qty,
-            purchase_price=buy, current_price=current, invested_amount=invested,
-            current_value=value, notes=note, is_sample=True, db_path=db_path,
-        )
+    db.add_investments_bulk([
+        {"name": name, "category": category, "valuation_mode": mode, "purchase_date": today - timedelta(days=days_ago),
+         "quantity": qty, "purchase_price": buy, "current_price": current, "invested_amount": invested,
+         "current_value": value, "notes": note}
+        for name, category, mode, qty, buy, current, invested, value, days_ago in holdings
+    ], is_sample=True, db_path=db_path)
 
 
 def initialize(db_path=None) -> bool:
