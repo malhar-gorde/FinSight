@@ -1,0 +1,6 @@
+# Local development and testing (not installed on Vercel)
+-r requirements.txt
+uvicorn>=0.30
+pytest>=8.0
+httpx>=0.27
+pgserver>=0.1

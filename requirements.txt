@@ -1,0 +1,4 @@
+# Runtime dependencies for the Python API (installed by Vercel)
+fastapi>=0.115
+pandas>=2.2
+psycopg[binary]>=3.2

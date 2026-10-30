@@ -1,0 +1,31 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local data and exports — never commit personal financial data
+data/*.db
+data/*.db-journal
+.pgdata/
+*.csv
+*.zip
+
+# Secrets
+.env
+.env*.local
+
+# Vercel / editors / OS
+.vercel/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
