@@ -251,3 +251,19 @@ def test_settings_round_trip(db_path):
     db.set_setting("user_name", "Aarav", db_path)
     db.set_setting("user_name", "Meera", db_path)
     assert db.get_all_settings(db_path)["user_name"] == "Meera"
+
+
+# ---------------------------------------------------------------- environment
+def test_find_database_url_handles_vercel_names():
+    url = "postgresql://u:p@host/db"
+    assert db.find_database_url({"DATABASE_URL": url}) == url
+    assert db.find_database_url({"POSTGRES_URL": url}) == url
+    # Custom prefix chosen when connecting the database in Vercel
+    assert db.find_database_url({"STORAGE_DATABASE_URL": url}) == url
+    assert db.find_database_url({"NEON_POSTGRES_URL": url}) == url
+    # Pooled URL preferred over the unpooled variant
+    assert db.find_database_url({"STORAGE_DATABASE_URL_UNPOOLED": "postgresql://direct",
+                                 "STORAGE_DATABASE_URL": url}) == url
+    # Non-postgres values and unrelated variables are ignored
+    assert db.find_database_url({"DATABASE_URL": "", "OTHER": url}) is None
+    assert db.find_database_url({}) is None

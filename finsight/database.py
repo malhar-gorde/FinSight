@@ -55,11 +55,30 @@ class DuplicateBudgetError(ValidationError):
 # --------------------------------------------------------------------------- #
 # Target resolution and connections
 # --------------------------------------------------------------------------- #
+def find_database_url(env) -> str | None:
+    """Find a PostgreSQL URL in the environment.
+
+    Prefers DATABASE_URL / POSTGRES_URL. When a database is connected in Vercel
+    with a custom prefix the variables are named e.g. STORAGE_DATABASE_URL, so any
+    variable ending in _DATABASE_URL or _POSTGRES_URL is accepted as a fallback.
+    Unpooled/direct variants are skipped in favour of pooled URLs, which suit
+    serverless functions better.
+    """
+    for name in ("DATABASE_URL", "POSTGRES_URL"):
+        if env.get(name, "").startswith(("postgres://", "postgresql://")):
+            return env[name]
+    for name in sorted(env):
+        if name.endswith(("_DATABASE_URL", "_POSTGRES_URL")) and "UNPOOLED" not in name \
+                and env[name].startswith(("postgres://", "postgresql://")):
+            return env[name]
+    return None
+
+
 def resolve_db_path(db_path=None) -> str:
     """Return the database target: a postgres URL or a SQLite file path."""
     if db_path is not None:
         return str(db_path)
-    url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+    url = find_database_url(os.environ)
     if url:
         return url
     if os.environ.get("FINSIGHT_DB_PATH"):
